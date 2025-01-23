@@ -1,8 +1,11 @@
+from sklearn.metrics import accuracy_score
+from sklearn.neural_network import MLPClassifier
 from sklearn.preprocessing import MinMaxScaler
 import pandas as pd
 from sklearn.model_selection import train_test_split
 import numpy as np
 import argparse
+import matplotlib.pyplot as plt
 
 
 def preprocessing(data):
@@ -93,8 +96,16 @@ def sigmoid(x):
     return 1 / (1 + np.exp(-x))
 
 
+def relu(x):
+    return np.maximum(0, x)
+
+
 def sigmoid_derivative(x):
     return sigmoid(x) * (1 - sigmoid(x))
+
+
+def relu_derivative(x):
+    return (x > 0).astype(int)
 
 
 def softmax(x):
@@ -163,13 +174,15 @@ def forward_propagation(X, weights, biases, activation='sigmoid', output_activat
         else:
             if activation == 'sigmoid':
                 activation_output = sigmoid(z)
+            elif activation == 'relu':
+                activation_output = relu(z)
 
         layers.append(activation_output)
 
     return layers, Z
 
 
-def backward_propagation(y_true, activations, Z, weights):
+def backward_propagation(y_true, activations, Z, weights, activation='sigmoid'):
     gradients = {"dW": [], "db": []}
     num_layers = len(weights)
     m = y_true.shape[0]  # Number of samples
@@ -184,7 +197,10 @@ def backward_propagation(y_true, activations, Z, weights):
         gradients["db"].insert(0, db)
 
         if i > 0:
-            delta = np.dot(delta, weights[i]) * sigmoid_derivative(Z[i-1])  # Apply to Z instead of A
+            if activation == 'sigmoid':
+                delta = np.dot(delta, weights[i]) * sigmoid_derivative(Z[i-1])
+            elif activation == 'relu':
+                delta = np.dot(delta, weights[i]) * relu_derivative(Z[i-1])
 
     return gradients
 
@@ -196,13 +212,11 @@ def update_parameters(weights, biases, gradients, learning_rate):
     return weights, biases
 
 
-def train(data, hidden_layer_nb=2, output_nb=2,  epochs=1000, learning_rate=0.005, batch_size=8, patience_early_stop=5):
+def train(data, hidden_layer_nb=2, output_nb=2,  epochs=20000, learning_rate=0.0005, batch_size=8, patience_early_stop=30):
 
     # Initialize
     X_train, y_train = split_data_to_x_y(data)
-    print(X_train.shape)
-    print(y_train.shape)
-    hidden_nodes_nb, weights, biases = init(X_train, hidden_layer_nb, output_nb, 'xavier')
+    hidden_nodes_nb, weights, biases = init(X_train, hidden_layer_nb, output_nb, 'xavier', 12)
     n_samples = X_train.shape[0]
     wait = 0
     best_loss = float('inf')
@@ -222,7 +236,7 @@ def train(data, hidden_layer_nb=2, output_nb=2,  epochs=1000, learning_rate=0.00
             y_batch = y_shuffled[i:i+batch_size]
 
             # Forward pass
-            activations, Z = forward_propagation(X_batch, weights, biases)
+            activations, Z = forward_propagation(X_batch, weights, biases, 'relu')
 
             # Compute loss
             loss = round(evaluate(y_batch, activations[-1]), 4)
@@ -230,7 +244,7 @@ def train(data, hidden_layer_nb=2, output_nb=2,  epochs=1000, learning_rate=0.00
             epoch_loss += loss
 
             # Backward pass
-            gradients = backward_propagation(y_batch, activations, Z, weights)
+            gradients = backward_propagation(y_batch, activations, Z, weights, 'relu')
 
             # Update parameters
             weights, biases = update_parameters(weights, biases, gradients, learning_rate)
@@ -257,9 +271,11 @@ def train(data, hidden_layer_nb=2, output_nb=2,  epochs=1000, learning_rate=0.00
 def predict(data, weight, bias):
     X_val, y_val = split_data_to_x_y(data)
 
-    activations, _ = forward_propagation(X_val, weight, bias)
+    activations, _ = forward_propagation(X_val, weight, bias, 'relu')
     y_pred = activations[-1]
     results = evaluate_metrics(y_val, y_pred)
+
+
     print(results)
 
 
@@ -318,9 +334,10 @@ def init_args():
         help='Path to the trained biases file'
     )
 
+
     parser.add_argument(
         'mode',
-                    choices=['train', 'split', 'predict'],
+                    choices=['train', 'split', 'predict', 'sklearn'],
                     help='Mode of operation: train or predict'
     )
     args = parser.parse_args()
@@ -338,13 +355,28 @@ def main():
         print('Data split successfully')
     elif args.mode == 'train':
         data = load_data(args.data_train)
-        weights, biases = train(data)
+        weights, biases = train(data, hidden_layer_nb=2)
         save_weight_bias(weights, biases, args.data_train_weight, args.data_train_biais)
+    elif args.mode == 'sklearn':
+        data_train = load_data(args.data_train)
+        X_train, y_train = split_data_to_x_y(data_train)
+        data_predict = load_data(args.data_predict)
+        X_val, y_val = split_data_to_x_y(data_predict)
+        mlp = MLPClassifier(hidden_layer_sizes=(16, 16),
+                            max_iter=1000, random_state=42)
+        mlp.fit(X_train, y_train)
+        y_pred = mlp.predict(X_val)
+        accuracy = accuracy_score(y_val, y_pred)
+        plt.plot(mlp.loss_curve_)
+        plt.title("Évolution de la perte (log-loss), with best loss : " + str(mlp.best_loss_))
+        plt.xlabel("Itérations")
+        plt.ylabel("Perte")
+        plt.show()
+        print(f"Accuracy: {accuracy}")
     else:
         data = load_data(args.data_predict)
         weights, biases = load_weight_bias(args.data_train_weight, args.data_train_biais)
         predict(data, weights, biases)
-    return data
 
 
 if __name__ == '__main__':
