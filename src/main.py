@@ -1,0 +1,351 @@
+from sklearn.preprocessing import MinMaxScaler
+import pandas as pd
+from sklearn.model_selection import train_test_split
+import numpy as np
+import argparse
+
+
+def preprocessing(data):
+    # Change labels to 0 and 1
+    data[1] = data[1].map({'M': 1, 'B': 0})
+
+    # Drop the first column which is the ID
+    data.drop(0, axis=1, inplace=True)
+
+
+    # Standardize the data
+    scaler = MinMaxScaler()
+
+    features = [col for col in data.columns if col != 'label']
+    data[features] = scaler.fit_transform(data[features])
+
+    return data
+
+
+def load_data(filename):
+    df = pd.read_csv(filename, header=None)
+
+    return df
+
+
+
+def split_data(data):
+    y = data[1]
+    X = data.drop(1, axis=1)
+    X_train, X_val, y_train, y_val = train_test_split(
+        X, y,
+        test_size=0.2,
+        random_state=42
+    )
+    return X_train, X_val, y_train, y_val
+
+
+def save_data_split(X_train, X_val, y_train, y_val, output_filename_train_data, output_filename_val_data):
+    train_data = pd.concat([y_train, X_train], axis=1)
+    val_data = pd.concat([y_val, X_val], axis=1)
+
+    train_data.to_csv(output_filename_train_data, index=False)
+    val_data.to_csv(output_filename_val_data, index=False)
+
+
+
+def split_data_to_x_y(data):
+    y = data[0]
+    X = data.drop(0, axis=1)
+    y = pd.get_dummies(y).values
+
+    return X, y
+
+
+def init(X_train, hidden_layer_nb=2, outputs_nb=2, weights_initializer='heUniform', hidden_nodes_nb=None):
+
+    if hidden_nodes_nb is None:
+        hidden_nodes_nb = int(((X_train.shape[1] + outputs_nb) / 2))
+
+    weights = []
+    biases = []
+
+    for layer in range(hidden_layer_nb + 1):
+        # Input Layer to Hidden Layer
+        if layer == 0:
+            nodes_in = X_train.shape[1]
+            nodes_out = hidden_nodes_nb
+        # Hidden Layer to Hidden Layer
+        elif layer < hidden_layer_nb:
+            nodes_in = hidden_nodes_nb
+            nodes_out = hidden_nodes_nb
+        # Hidden Layer to Output Layer
+        else:
+            nodes_in = hidden_nodes_nb
+            nodes_out = outputs_nb
+
+        if weights_initializer == 'xavier':
+            limit = np.sqrt(6 / (nodes_in + nodes_out))
+        else:
+            limit = np.sqrt(6 / nodes_in)
+        weights.append(np.random.uniform(-limit, limit, (nodes_out, nodes_in)))
+        biases.append(np.zeros(nodes_out))
+
+    return hidden_nodes_nb, weights, biases
+
+
+def sigmoid(x):
+    return 1 / (1 + np.exp(-x))
+
+
+def sigmoid_derivative(x):
+    return sigmoid(x) * (1 - sigmoid(x))
+
+
+def softmax(x):
+    exp_x = np.exp(x - np.max(x, axis=1, keepdims=True))
+    return exp_x / np.sum(exp_x, axis=1, keepdims=True)
+
+
+def evaluate(y_train, y_pred, loss='binary_cross_entropy'):
+    if loss == 'binary_cross_entropy':
+        epsilon = 1e-15
+        y_pred = np.clip(y_pred, epsilon, 1 - epsilon)
+        # N = y_train.shape[0]
+        N = len(y_train)
+
+        loss = -(1/N) * np.sum(
+            y_train * np.log(y_pred) +
+            (1 - y_train) * np.log(1 - y_pred)
+        )
+    return loss
+
+
+def evaluate_metrics(y_train, y_pred, loss='binary_cross_entropy'):
+    epsilon = 1e-15
+    y_pred = np.clip(y_pred, epsilon, 1 - epsilon)
+
+    loss = evaluate(y_train, y_pred, loss)
+
+    y_pred_class = (y_pred >= 0.5).astype(int)
+    y_true_class = y_train.astype(int)
+
+    accuracy = np.mean(y_pred_class == y_true_class)
+
+    # Precision, Recall, F1
+    true_positives = np.sum((y_true_class == 1) & (y_pred_class == 1))
+    false_positives = np.sum((y_true_class == 0) & (y_pred_class == 1))
+    false_negatives = np.sum((y_true_class == 1) & (y_pred_class == 0))
+
+    precision = true_positives / (true_positives + false_positives) if (true_positives + false_positives) > 0 else 0
+    recall = true_positives / (true_positives + false_negatives) if (true_positives + false_negatives) > 0 else 0
+
+    f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
+    metrics = {
+        'loss': loss,
+        'accuracy': accuracy,
+        'precision': precision,
+        'recall': recall,
+        'f1_score': f1
+    }
+    return metrics
+
+
+def forward_propagation(X, weights, biases, activation='sigmoid', output_activation='softmax'):
+    layers = [X]  # List of layer activations
+    Z = []        # List of pre-activation values
+
+    for i in range(len(weights)):
+        z = np.dot(layers[i], weights[i].T) + biases[i]
+        Z.append(z)
+
+        # Compute activation
+        if i == len(weights) - 1:
+            if output_activation == 'softmax':
+                activation_output = softmax(z)
+            else:
+                activation_output = sigmoid(z)
+        else:
+            if activation == 'sigmoid':
+                activation_output = sigmoid(z)
+
+        layers.append(activation_output)
+
+    return layers, Z
+
+
+def backward_propagation(y_true, activations, Z, weights):
+    gradients = {"dW": [], "db": []}
+    num_layers = len(weights)
+    m = y_true.shape[0]  # Number of samples
+
+    delta = (activations[-1] - y_true) / m
+
+    for i in reversed(range(num_layers)):
+        dW = np.dot(delta.T, activations[i])
+        db = np.sum(delta, axis=0)
+
+        gradients["dW"].insert(0, dW)
+        gradients["db"].insert(0, db)
+
+        if i > 0:
+            delta = np.dot(delta, weights[i]) * sigmoid_derivative(Z[i-1])  # Apply to Z instead of A
+
+    return gradients
+
+
+def update_parameters(weights, biases, gradients, learning_rate):
+    for i in range(len(weights)):
+        weights[i] -= learning_rate * gradients["dW"][i]
+        biases[i] -= learning_rate * gradients["db"][i]
+    return weights, biases
+
+
+def train(data, hidden_layer_nb=2, output_nb=2,  epochs=1000, learning_rate=0.005, batch_size=8, patience_early_stop=5):
+
+    # Initialize
+    X_train, y_train = split_data_to_x_y(data)
+    print(X_train.shape)
+    print(y_train.shape)
+    hidden_nodes_nb, weights, biases = init(X_train, hidden_layer_nb, output_nb, 'xavier')
+    n_samples = X_train.shape[0]
+    wait = 0
+    best_loss = float('inf')
+
+    # Training
+    for epoch in range(epochs):
+        # Shuffle data
+        permutation = np.random.permutation(n_samples)
+        X_shuffled = X_train.iloc[permutation]
+        y_shuffled = y_train[permutation]
+
+        epoch_loss = 0
+
+        # Mini-batch training
+        for i in range(0, n_samples, batch_size):
+            X_batch = X_shuffled.iloc[i:i+batch_size]
+            y_batch = y_shuffled[i:i+batch_size]
+
+            # Forward pass
+            activations, Z = forward_propagation(X_batch, weights, biases)
+
+            # Compute loss
+            loss = round(evaluate(y_batch, activations[-1]), 4)
+
+            epoch_loss += loss
+
+            # Backward pass
+            gradients = backward_propagation(y_batch, activations, Z, weights)
+
+            # Update parameters
+            weights, biases = update_parameters(weights, biases, gradients, learning_rate)
+
+        # Early stopping
+        avg_loss = epoch_loss / (n_samples // batch_size)
+        if avg_loss < best_loss:
+            best_loss = avg_loss
+            wait = 0
+        else:
+            wait += 1
+            if wait >= patience_early_stop:
+                print(f"Early stopping at epoch {epoch}")
+                break
+
+        # Print loss every 100 epochs
+        if epoch % 100 == 0:
+            avg_loss = epoch_loss / (n_samples // batch_size)
+            print(f"Epoch {epoch}, Loss: {avg_loss:.4f}")
+
+    return weights, biases
+
+
+def predict(data, weight, bias):
+    X_val, y_val = split_data_to_x_y(data)
+
+    activations, _ = forward_propagation(X_val, weight, bias)
+    y_pred = activations[-1]
+    results = evaluate_metrics(y_val, y_pred)
+    print(results)
+
+
+def load_weight_bias(file_weight, file_bias):
+    weights = np.load(file_weight, allow_pickle=True)
+    biases = np.load(file_bias, allow_pickle=True)
+    return weights, biases
+
+
+def save_weight_bias(weights, biases, file_weight, file_bias):
+    weights = np.array(weights, dtype=object)
+    biases = np.array(biases, dtype=object)
+    np.save(file_weight, weights)
+    np.save(file_bias, biases)
+
+
+
+def init_args():
+    parser = argparse.ArgumentParser(
+        description='Brain Computer Interface for EEG (electroencephalogram) from this data : '
+                    'https://physionet.org/content/eegmmidb/1.0.0/)',
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+    )
+    parser.add_argument(
+        '--data-split',
+        type=str,
+        default='data/raw/data.csv',
+        help='Path to the data file'
+    )
+
+    parser.add_argument(
+        '--data-train',
+        type=str,
+        default='data/processed/data_train.csv',
+        help='Path to the processed predict data file'
+    )
+
+    parser.add_argument(
+        '--data-predict',
+        type=str,
+        default='data/processed/data_predict.csv',
+        help='Path to the processed data file'
+    )
+
+    parser.add_argument(
+        '--data-train-weight',
+        type=str,
+        default='data/trained/weights.npy',
+        help='Path to the trained weights file'
+    )
+
+    parser.add_argument(
+        '--data-train-biais',
+        type=str,
+        default='data/trained/biases.npy',
+        help='Path to the trained biases file'
+    )
+
+    parser.add_argument(
+        'mode',
+                    choices=['train', 'split', 'predict'],
+                    help='Mode of operation: train or predict'
+    )
+    args = parser.parse_args()
+    return args
+
+
+def main():
+    args = init_args()
+
+    if args.mode == 'split':
+        data = load_data(args.data_split)
+        data = preprocessing(data)
+        X_train, X_val, y_train, y_val = split_data(data)
+        save_data_split(X_train, X_val, y_train, y_val, args.data_train, args.data_predict)
+        print('Data split successfully')
+    elif args.mode == 'train':
+        data = load_data(args.data_train)
+        weights, biases = train(data)
+        save_weight_bias(weights, biases, args.data_train_weight, args.data_train_biais)
+    else:
+        data = load_data(args.data_predict)
+        weights, biases = load_weight_bias(args.data_train_weight, args.data_train_biais)
+        predict(data, weights, biases)
+    return data
+
+
+if __name__ == '__main__':
+    main()
