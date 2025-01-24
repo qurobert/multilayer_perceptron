@@ -68,7 +68,7 @@ def split_data_to_x_y(data):
     return X, y
 
 
-def init(X_train, hidden_layer_nb=2, outputs_nb=2, weights_initializer='heUniform', hidden_nodes_nb=None):
+def init(X_train, hidden_layer_nb=2, outputs_nb=2, weights_initializer='xavier', hidden_nodes_nb=None):
 
     if hidden_nodes_nb is None:
         hidden_nodes_nb = int(((X_train.shape[1] + outputs_nb) / 2))
@@ -124,16 +124,19 @@ def softmax(x):
 
 
 def evaluate(y_train, y_pred, loss='binary_cross_entropy'):
-    if loss == 'binary_cross_entropy':
-        epsilon = 1e-15
-        y_pred = np.clip(y_pred, epsilon, 1 - epsilon)
-        # N = y_train.shape[0]
-        N = len(y_train)
+    epsilon = 1e-15
+    y_pred = np.clip(y_pred, epsilon, 1 - epsilon)
+    # N = y_train.shape[0]
+    N = len(y_train)
 
+    if loss == 'binary_cross_entropy':
         loss = -(1/N) * np.sum(
             y_train * np.log(y_pred) +
             (1 - y_train) * np.log(1 - y_pred)
         )
+    elif loss == 'categorical_cross_entropy':
+        loss = -(1/N) * np.sum(y_train * np.log(y_pred))
+
     return loss
 
 
@@ -173,7 +176,7 @@ def evaluate_metrics(y_train, y_pred, loss='binary_cross_entropy'):
     return metrics
 
 
-def forward_propagation(X, weights, biases, activation='sigmoid', output_activation='softmax'):
+def forward_propagation(X, weights, biases, activation='relu', output_activation='softmax'):
     layers = [X]  # List of layer activations
     Z = []        # List of pre-activation values
 
@@ -228,12 +231,12 @@ def update_parameters(weights, biases, gradients, learning_rate):
     return weights, biases
 
 
-def train(data_train, data_predict, hidden_layer_nb=2, output_nb=2,  epochs=1000, learning_rate=0.0005, batch_size=8, patience_early_stop=30):
+def train(data_train, data_predict, hidden_layer_nb=4, output_nb=2,  epochs=50000, learning_rate=0.0003, batch_size=8, patience_early_stop=50):
 
     # Initialize
     X_train, y_train = split_data_to_x_y(data_train)
     X_val, y_val = split_data_to_x_y(data_predict)
-    hidden_nodes_nb, weights, biases = init(X_train, hidden_layer_nb, output_nb, 'xavier', 12)
+    hidden_nodes_nb, weights, biases = init(X_train, hidden_layer_nb, output_nb, 'xavier', 24)
     n_samples = X_train.shape[0]
     wait = 0
     best_loss = float('inf')
@@ -246,6 +249,7 @@ def train(data_train, data_predict, hidden_layer_nb=2, output_nb=2,  epochs=1000
     logging.info("Training the model")
     for epoch in pbar:
         # Shuffle data
+        np.random.seed(epoch)
         permutation = np.random.permutation(n_samples)
         X_shuffled = X_train.iloc[permutation]
         y_shuffled = y_train[permutation]
@@ -257,7 +261,7 @@ def train(data_train, data_predict, hidden_layer_nb=2, output_nb=2,  epochs=1000
             y_batch = y_shuffled[i:i+batch_size]
 
             # Forward pass
-            activations, Z = forward_propagation(X_batch, weights, biases, 'relu')
+            activations, Z = forward_propagation(X_batch, weights, biases)
 
             # Compute loss
             loss = round(evaluate(y_batch, activations[-1]), 4)
@@ -265,7 +269,7 @@ def train(data_train, data_predict, hidden_layer_nb=2, output_nb=2,  epochs=1000
             epoch_loss += loss
 
             # Backward pass
-            gradients = backward_propagation(y_batch, activations, Z, weights, 'relu')
+            gradients = backward_propagation(y_batch, activations, Z, weights)
 
             # Update parameters
             weights, biases = update_parameters(weights, biases, gradients, learning_rate)
@@ -333,15 +337,15 @@ def display_results(metrics_train, metrics_val):
 def predict(data, weight, bias):
     X_val, y_val = split_data_to_x_y(data)
 
-    activations, _ = forward_propagation(X_val, weight, bias, 'relu')
+    activations, _ = forward_propagation(X_val, weight, bias)
     y_pred = activations[-1]
     results = evaluate_metrics(y_val, y_pred)
 
 
-    print(results)
     logging.info("Predicting the data")
-    logging.info(f"Loss: {results['loss']}")
-    logging.info(f"Accuracy: {results['accuracy']}")
+    for key, value in results.items():
+        print(f"{key}: {value}")
+        logging.info(f"{key}: {value}")
 
 
 def load_weight_bias(file_weight, file_bias):
