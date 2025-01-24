@@ -1,6 +1,8 @@
+import tqdm
 from sklearn.metrics import accuracy_score
 from sklearn.neural_network import MLPClassifier
 from sklearn.preprocessing import MinMaxScaler
+from sklearn.metrics import roc_auc_score
 import pandas as pd
 from sklearn.model_selection import train_test_split
 import numpy as np
@@ -147,12 +149,18 @@ def evaluate_metrics(y_train, y_pred, loss='binary_cross_entropy'):
     recall = true_positives / (true_positives + false_negatives) if (true_positives + false_negatives) > 0 else 0
 
     f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
+    # Vérifie s'il y a deux classes avant de calculer l'AUC-ROC
+    # if len(np.unique(y_pred)) > 1 and len(np.unique(y_train)) > 1:
+    #     print("ROC_AUC")
+    #     roc_auc = roc_auc_score(y_train, y_pred)
+    # else:
+    #     roc_auc = 0
     metrics = {
         'loss': loss,
         'accuracy': accuracy,
         'precision': precision,
         'recall': recall,
-        'f1_score': f1
+        'f1_score': f1,
     }
     return metrics
 
@@ -212,24 +220,28 @@ def update_parameters(weights, biases, gradients, learning_rate):
     return weights, biases
 
 
-def train(data, hidden_layer_nb=2, output_nb=2,  epochs=20000, learning_rate=0.0005, batch_size=8, patience_early_stop=30):
+def train(data_train, data_predict, hidden_layer_nb=2, output_nb=2,  epochs=1000, learning_rate=0.0005, batch_size=8, patience_early_stop=30):
 
     # Initialize
-    X_train, y_train = split_data_to_x_y(data)
+    X_train, y_train = split_data_to_x_y(data_train)
+    X_val, y_val = split_data_to_x_y(data_predict)
     hidden_nodes_nb, weights, biases = init(X_train, hidden_layer_nb, output_nb, 'xavier', 12)
     n_samples = X_train.shape[0]
     wait = 0
     best_loss = float('inf')
+    metrics_train = []
+    metrics_val = []
+
 
     # Training
-    for epoch in range(epochs):
+    pbar = tqdm.tqdm(range(epochs))
+    for epoch in pbar:
         # Shuffle data
         permutation = np.random.permutation(n_samples)
         X_shuffled = X_train.iloc[permutation]
         y_shuffled = y_train[permutation]
 
         epoch_loss = 0
-
         # Mini-batch training
         for i in range(0, n_samples, batch_size):
             X_batch = X_shuffled.iloc[i:i+batch_size]
@@ -249,8 +261,14 @@ def train(data, hidden_layer_nb=2, output_nb=2,  epochs=20000, learning_rate=0.0
             # Update parameters
             weights, biases = update_parameters(weights, biases, gradients, learning_rate)
 
-        # Early stopping
         avg_loss = epoch_loss / (n_samples // batch_size)
+
+        # Compute metrics
+        metrics_train.append(evaluate_metrics(y_batch, activations[-1]))
+        activations, _ = forward_propagation(X_val, weights, biases, 'relu')
+        metrics_val.append(evaluate_metrics(y_val, activations[-1]))
+
+        # Early stopping
         if avg_loss < best_loss:
             best_loss = avg_loss
             wait = 0
@@ -262,10 +280,40 @@ def train(data, hidden_layer_nb=2, output_nb=2,  epochs=20000, learning_rate=0.0
 
         # Print loss every 100 epochs
         if epoch % 100 == 0:
-            avg_loss = epoch_loss / (n_samples // batch_size)
-            print(f"Epoch {epoch}, Loss: {avg_loss:.4f}")
+            pbar.set_description(f"Loss: {avg_loss:.4f}")
 
-    return weights, biases
+    return weights, biases, metrics_train, metrics_val
+
+
+def moving_average(data, window_size=50):
+    return np.convolve(data, np.ones(window_size)/window_size, mode='valid')
+
+
+def display_results(metrics_train, metrics_val):
+    plt.figure(figsize=(12, 6))
+
+
+    loss_train = moving_average([m['loss'] for m in metrics_train])
+    loss_val = moving_average([m['loss'] for m in metrics_val])
+    plt.subplot(2, 2, 1)
+    plt.plot(loss_train, label='Train')
+    plt.plot(loss_val, label='Validation')
+    plt.xlabel('Epochs')
+    plt.ylabel('Loss')
+    plt.legend()
+    plt.title('Loss')
+
+    accuracy_train = moving_average([m['accuracy'] for m in metrics_train])
+    accuracy_val = moving_average([m['accuracy'] for m in metrics_val])
+    plt.subplot(2, 2, 2)
+    plt.plot(accuracy_train, label='Train')
+    plt.plot(accuracy_val, label='Validation')
+    plt.xlabel('Epochs')
+    plt.ylabel('Accuracy')
+    plt.legend()
+    plt.title('Accuracy')
+
+    plt.show()
 
 
 def predict(data, weight, bias):
@@ -295,8 +343,7 @@ def save_weight_bias(weights, biases, file_weight, file_bias):
 
 def init_args():
     parser = argparse.ArgumentParser(
-        description='Brain Computer Interface for EEG (electroencephalogram) from this data : '
-                    'https://physionet.org/content/eegmmidb/1.0.0/)',
+        description='Multi-layer Perceptron for binary classification from malignant and benign breast cancer cells',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
     parser.add_argument(
@@ -354,8 +401,10 @@ def main():
         save_data_split(X_train, X_val, y_train, y_val, args.data_train, args.data_predict)
         print('Data split successfully')
     elif args.mode == 'train':
-        data = load_data(args.data_train)
-        weights, biases = train(data, hidden_layer_nb=2)
+        data_train = load_data(args.data_train)
+        data_predict = load_data(args.data_predict)
+        weights, biases, metrics_train, metrics_val, = train(data_train, data_predict, hidden_layer_nb=2)
+        display_results(metrics_train, metrics_val)
         save_weight_bias(weights, biases, args.data_train_weight, args.data_train_biais)
     elif args.mode == 'sklearn':
         data_train = load_data(args.data_train)
