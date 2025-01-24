@@ -1,8 +1,9 @@
+import logging
+
 import tqdm
 from sklearn.metrics import accuracy_score
 from sklearn.neural_network import MLPClassifier
 from sklearn.preprocessing import MinMaxScaler
-from sklearn.metrics import roc_auc_score
 import pandas as pd
 from sklearn.model_selection import train_test_split
 import numpy as np
@@ -12,10 +13,13 @@ import matplotlib.pyplot as plt
 
 def preprocessing(data):
     # Change labels to 0 and 1
+    logging.info("Preprocessing data...")
     data[1] = data[1].map({'M': 1, 'B': 0})
+    logging.info("Changing labels to 0 and 1")
 
     # Drop the first column which is the ID
     data.drop(0, axis=1, inplace=True)
+    logging.info("Dropping the first column which is the ID")
 
 
     # Standardize the data
@@ -23,6 +27,7 @@ def preprocessing(data):
 
     features = [col for col in data.columns if col != 'label']
     data[features] = scaler.fit_transform(data[features])
+    logging.info("Standardizing the data")
 
     return data
 
@@ -51,6 +56,7 @@ def save_data_split(X_train, X_val, y_train, y_val, output_filename_train_data, 
 
     train_data.to_csv(output_filename_train_data, index=False)
     val_data.to_csv(output_filename_val_data, index=False)
+    logging.info("Saving the split data")
 
 
 
@@ -85,8 +91,10 @@ def init(X_train, hidden_layer_nb=2, outputs_nb=2, weights_initializer='heUnifor
             nodes_out = outputs_nb
 
         if weights_initializer == 'xavier':
+            logging.info("Using Xavier initialization")
             limit = np.sqrt(6 / (nodes_in + nodes_out))
         else:
+            logging.info("Using He initialization")
             limit = np.sqrt(6 / nodes_in)
         weights.append(np.random.uniform(-limit, limit, (nodes_out, nodes_in)))
         biases.append(np.zeros(nodes_out))
@@ -235,6 +243,7 @@ def train(data_train, data_predict, hidden_layer_nb=2, output_nb=2,  epochs=1000
 
     # Training
     pbar = tqdm.tqdm(range(epochs))
+    logging.info("Training the model")
     for epoch in pbar:
         # Shuffle data
         permutation = np.random.permutation(n_samples)
@@ -275,13 +284,18 @@ def train(data_train, data_predict, hidden_layer_nb=2, output_nb=2,  epochs=1000
         else:
             wait += 1
             if wait >= patience_early_stop:
+                logging.info(f"Early stopping at epoch {epoch}")
                 print(f"Early stopping at epoch {epoch}")
                 break
 
         # Print loss every 100 epochs
         if epoch % 100 == 0:
             pbar.set_description(f"Loss: {avg_loss:.4f}")
+            logging.info(f"Epoch {epoch} - Loss: {avg_loss:.4f}")
 
+    logging.info("Training completed")
+    logging.info(f"Loss: {avg_loss}")
+    logging.info(f"Accuracy: {metrics_val[-1]['accuracy']}")
     return weights, biases, metrics_train, metrics_val
 
 
@@ -325,6 +339,9 @@ def predict(data, weight, bias):
 
 
     print(results)
+    logging.info("Predicting the data")
+    logging.info(f"Loss: {results['loss']}")
+    logging.info(f"Accuracy: {results['accuracy']}")
 
 
 def load_weight_bias(file_weight, file_bias):
@@ -336,6 +353,7 @@ def load_weight_bias(file_weight, file_bias):
 def save_weight_bias(weights, biases, file_weight, file_bias):
     weights = np.array(weights, dtype=object)
     biases = np.array(biases, dtype=object)
+    logging.info("Saving weights and biases")
     np.save(file_weight, weights)
     np.save(file_bias, biases)
 
@@ -380,6 +398,11 @@ def init_args():
         default='data/trained/biases.npy',
         help='Path to the trained biases file'
     )
+    parser.add_argument(
+        '--disable-logs',
+        action='store_true',
+        help='Disable logs'
+    )
 
 
     parser.add_argument(
@@ -391,8 +414,17 @@ def init_args():
     return args
 
 
+def init_logs(args):
+    logging.basicConfig(filename='.log',
+                               level=logging.INFO,
+                               format='%(asctime)s - %(message)s')
+    if args.disable_logs:
+        logging.disable(logging.CRITICAL)
+
+
 def main():
     args = init_args()
+    init_logs(args)
 
     if args.mode == 'split':
         data = load_data(args.data_split)
@@ -400,6 +432,7 @@ def main():
         X_train, X_val, y_train, y_val = split_data(data)
         save_data_split(X_train, X_val, y_train, y_val, args.data_train, args.data_predict)
         print('Data split successfully')
+        logging.info("Split data successfully")
     elif args.mode == 'train':
         data_train = load_data(args.data_train)
         data_predict = load_data(args.data_predict)
@@ -407,6 +440,7 @@ def main():
         display_results(metrics_train, metrics_val)
         save_weight_bias(weights, biases, args.data_train_weight, args.data_train_biais)
     elif args.mode == 'sklearn':
+        logging.info("Using sklearn")
         data_train = load_data(args.data_train)
         X_train, y_train = split_data_to_x_y(data_train)
         data_predict = load_data(args.data_predict)
