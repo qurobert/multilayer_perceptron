@@ -140,7 +140,7 @@ def evaluate(y_train, y_pred, loss='binary_cross_entropy'):
     return loss
 
 
-def evaluate_metrics(y_train, y_pred, loss='categorical_cross_entropy'):
+def evaluate_metrics(y_train, y_pred, loss='binary_cross_entropy'):
     epsilon = 1e-15
     y_pred = np.clip(y_pred, epsilon, 1 - epsilon)
 
@@ -378,14 +378,14 @@ def init_args():
     parser.add_argument(
         '--data-train',
         type=str,
-        default='data/processed/data_train.csv',
+        default='data/processed/data_training.csv',
         help='Path to the processed predict data file'
     )
 
     parser.add_argument(
         '--data-predict',
         type=str,
-        default='data/processed/data_predict.csv',
+        default='data/processed/data_test.csv',
         help='Path to the processed data file'
     )
 
@@ -411,7 +411,7 @@ def init_args():
 
     parser.add_argument(
         'mode',
-                    choices=['train', 'split', 'predict', 'sklearn'],
+                    choices=['train', 'split', 'predict', 'sklearn', 'preprocessing'],
                     help='Mode of operation: train or predict'
     )
     args = parser.parse_args()
@@ -437,6 +437,13 @@ def main():
         save_data_split(X_train, X_val, y_train, y_val, args.data_train, args.data_predict)
         print('Data split successfully')
         logging.info("Split data successfully")
+    elif args.mode == "preprocessing":
+        data_train = preprocessing(load_data(args.data_train))
+        data_predict = preprocessing(load_data(args.data_predict))
+        data_train.to_csv(args.data_train, index=False)
+        data_predict.to_csv(args.data_predict, index=False)
+        print('Data preprocessing successfully')
+        logging.info("Data preprocessing successfully")
     elif args.mode == 'train':
         data_train = load_data(args.data_train)
         data_predict = load_data(args.data_predict)
