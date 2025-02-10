@@ -68,7 +68,7 @@ def split_data_to_x_y(data):
     return X, y
 
 
-def init(X_train, hidden_layer_nb=2, outputs_nb=2, weights_initializer='xavier', hidden_nodes_nb=None):
+def init(X_train, hidden_layer_nb=2, outputs_nb=2, weights_initializer='heUniform', hidden_nodes_nb=None):
 
     if hidden_nodes_nb is None:
         hidden_nodes_nb = int(((X_train.shape[1] + outputs_nb) / 2))
@@ -140,7 +140,7 @@ def evaluate(y_train, y_pred, loss='binary_cross_entropy'):
     return loss
 
 
-def evaluate_metrics(y_train, y_pred, loss='binary_cross_entropy'):
+def evaluate_metrics(y_train, y_pred, loss='categorical_cross_entropy'):
     epsilon = 1e-15
     y_pred = np.clip(y_pred, epsilon, 1 - epsilon)
 
@@ -160,12 +160,6 @@ def evaluate_metrics(y_train, y_pred, loss='binary_cross_entropy'):
     recall = true_positives / (true_positives + false_negatives) if (true_positives + false_negatives) > 0 else 0
 
     f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
-    # Vérifie s'il y a deux classes avant de calculer l'AUC-ROC
-    # if len(np.unique(y_pred)) > 1 and len(np.unique(y_train)) > 1:
-    #     print("ROC_AUC")
-    #     roc_auc = roc_auc_score(y_train, y_pred)
-    # else:
-    #     roc_auc = 0
     metrics = {
         'loss': loss,
         'accuracy': accuracy,
@@ -231,12 +225,12 @@ def update_parameters(weights, biases, gradients, learning_rate):
     return weights, biases
 
 
-def train(data_train, data_predict, hidden_layer_nb=4, output_nb=2,  epochs=50000, learning_rate=0.0003, batch_size=8, patience_early_stop=50):
+def train(data_train, data_predict, hidden_layer_nb=3, output_nb=2,  epochs=200, learning_rate=0.01, batch_size=7, patience_early_stop=200):
 
     # Initialize
     X_train, y_train = split_data_to_x_y(data_train)
     X_val, y_val = split_data_to_x_y(data_predict)
-    hidden_nodes_nb, weights, biases = init(X_train, hidden_layer_nb, output_nb, 'xavier', 24)
+    hidden_nodes_nb, weights, biases = init(X_train, hidden_layer_nb, output_nb, 'xavier', 28)
     n_samples = X_train.shape[0]
     wait = 0
     best_loss = float('inf')
@@ -277,9 +271,13 @@ def train(data_train, data_predict, hidden_layer_nb=4, output_nb=2,  epochs=5000
         avg_loss = epoch_loss / (n_samples // batch_size)
 
         # Compute metrics
-        metrics_train.append(evaluate_metrics(y_batch, activations[-1]))
-        activations, _ = forward_propagation(X_val, weights, biases, 'relu')
-        metrics_val.append(evaluate_metrics(y_val, activations[-1]))
+        metrics_train.append(evaluate_metrics(y_batch, activations[-1], 'binary_cross_entropy'))
+        activations, _ = forward_propagation(X_val, weights, biases)
+        metrics_val.append(evaluate_metrics(y_val, activations[-1], 'binary_cross_entropy'))
+        # if detect_overfitting(metrics_train, metrics_val):
+        #     logging.info("Overfitting detected at epoch {epoch}")
+        #     print(f"Overfitting detected at epoch {epoch}")
+        #     break
 
         # Early stopping
         if avg_loss < best_loss:
@@ -296,6 +294,8 @@ def train(data_train, data_predict, hidden_layer_nb=4, output_nb=2,  epochs=5000
         if epoch % 100 == 0:
             pbar.set_description(f"Loss: {avg_loss:.4f}")
             logging.info(f"Epoch {epoch} - Loss: {avg_loss:.4f}")
+
+        # learning_rate = adaptive_learning_rate(learning_rate, epoch, epochs)
 
     logging.info("Training completed")
     logging.info(f"Loss: {avg_loss}")
