@@ -1,8 +1,7 @@
 import logging
-from sklearn.metrics import log_loss
-import random
+
 import tqdm
-from sklearn.metrics import accuracy_score
+from sklearn.metrics import log_loss
 from sklearn.neural_network import MLPClassifier
 from sklearn.preprocessing import MinMaxScaler
 import pandas as pd
@@ -10,11 +9,6 @@ from sklearn.model_selection import train_test_split
 import numpy as np
 import argparse
 import matplotlib.pyplot as plt
-import io
-import os
-import sys
-import random
-import csv
 
 
 def preprocessing(data):
@@ -128,27 +122,30 @@ def softmax(x):
     return exp_x / np.sum(exp_x, axis=1, keepdims=True)
 
 
-def evaluate(y_train, y_pred, loss='categorical_cross_entropy'):
+def evaluate(y_train, y_pred, weights=None, l2_lambda=0.001):
     epsilon = 1e-15
     y_pred = np.clip(y_pred, epsilon, 1 - epsilon)
     N = len(y_train)
 
-    if loss == 'binary_cross_entropy':
-        loss = -(1/N) * np.sum(
-            y_train * np.log(y_pred) +
-            (1 - y_train) * np.log(1 - y_pred)
-        )
-    elif loss == 'categorical_cross_entropy':
-        loss = -(1/N) * np.sum(y_train * np.log(y_pred))
+    # Base categorical cross-entropy loss
+    base_loss = -(1 / N) * np.sum(y_train * np.log(y_pred))
 
-    return loss
+    # Add L2 regularization term if weights are provided
+    if weights is not None:
+        l2_term = 0
+        for w in weights:
+            l2_term += np.sum(w ** 2)
+        l2_loss = (l2_lambda / (2 * N)) * l2_term
+        return base_loss + l2_loss
+
+    return base_loss
 
 
-def evaluate_metrics(y_train, y_pred, loss='categorical_cross_entropy'):
+def evaluate_metrics(y_train, y_pred, weights=None, l2_lambda=0.001):
     epsilon = 1e-15
     y_pred = np.clip(y_pred, epsilon, 1 - epsilon)
 
-    loss = evaluate(y_train, y_pred, loss)
+    loss = evaluate(y_train, y_pred, weights, l2_lambda)
 
     y_pred_class = (y_pred >= 0.5).astype(int)
     y_true_class = y_train.astype(int)
@@ -197,7 +194,7 @@ def forward_propagation(X, weights, biases, activation='relu', output_activation
     return layers, Z
 
 
-def backward_propagation(y_true, activations, Z, weights, activation='relu'):
+def backward_propagation(y_true, activations, Z, weights, activation='relu', l2_lambda=0.001):
     gradients = {"dW": [], "db": []}
     num_layers = len(weights)
     m = y_true.shape[0]
@@ -205,7 +202,7 @@ def backward_propagation(y_true, activations, Z, weights, activation='relu'):
     delta = (activations[-1] - y_true) / m
 
     for i in reversed(range(num_layers)):
-        dW = np.dot(delta.T, activations[i])
+        dW = np.dot(delta.T, activations[i]) + (l2_lambda / m) * weights[i]
         db = np.sum(delta, axis=0)
 
         gradients["dW"].insert(0, dW)
@@ -227,12 +224,12 @@ def update_parameters(weights, biases, gradients, learning_rate):
     return weights, biases
 
 
-def train(data_train, data_predict, hidden_layer_nb=2, output_nb=2,  epochs=1000, learning_rate=0.0001, batch_size=10,
-          patience_early_stop=100, beta1=0.9, beta2=0.999, epsilon=1e-8):
+def train(data_train, data_predict, hidden_layer_nb=2, output_nb=2,  epochs=10000, learning_rate=0.00004, batch_size=32,
+          patience_early_stop=200, beta1=0.85, beta2=0.989, epsilon=1e-8, l2_lambda = 0.001):
 
     X_train, y_train = split_data_to_x_y(data_train)
     X_val, y_val = split_data_to_x_y(data_predict)
-    hidden_nodes_nb, weights, biases = init(X_train, hidden_layer_nb, output_nb, 'he', 22)
+    hidden_nodes_nb, weights, biases = init(X_train, hidden_layer_nb, output_nb, 'he', 20)
     n_samples = X_train.shape[0]
     metrics_train = []
     metrics_val = []
@@ -262,11 +259,11 @@ def train(data_train, data_predict, hidden_layer_nb=2, output_nb=2,  epochs=1000
 
             activations, Z = forward_propagation(X_batch, weights, biases)
 
-            loss = round(evaluate(y_batch, activations[-1]), 4)
+            loss = round(evaluate(y_batch, activations[-1], weights, l2_lambda), 4)
 
             epoch_loss += loss
 
-            gradients = backward_propagation(y_batch, activations, Z, weights)
+            gradients = backward_propagation(y_batch, activations, Z, weights, activation='relu', l2_lambda=l2_lambda)
 
             for l in range(len(weights)):
                 m_w[l] = beta1 * m_w[l] + (1 - beta1) * gradients['dW'][l]
@@ -290,11 +287,11 @@ def train(data_train, data_predict, hidden_layer_nb=2, output_nb=2,  epochs=1000
         avg_train_loss = epoch_loss / (n_samples // batch_size)
 
         val_activations, _ = forward_propagation(X_val, weights, biases)
-        val_metrics = evaluate_metrics(y_val, val_activations[-1])
+        val_metrics = evaluate_metrics(y_val, val_activations[-1], weights, l2_lambda)
         metrics_val.append(val_metrics)
         val_loss = val_metrics['loss']
 
-        metrics_train.append(evaluate_metrics(y_batch, activations[-1]))
+        metrics_train.append(evaluate_metrics(y_batch, activations[-1], weights, l2_lambda))
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
@@ -308,7 +305,7 @@ def train(data_train, data_predict, hidden_layer_nb=2, output_nb=2,  epochs=1000
                 logging.info(f"Early stopping at epoch {epoch}")
                 logging.info(f"Best validation loss: {best_val_loss:.4f}")
                 print(f"Early stopping at epoch {epoch}")
-                print(f"Best validation loss: {best_val_loss:.4f}")
+                print(f"Best validation loss: {best_val_loss:.3f}")
                 break
 
         pbar.set_description(f"Train Loss: {avg_train_loss:.4f}, Val Loss: {val_loss:.4f}")
@@ -354,7 +351,7 @@ def display_results(metrics_train, metrics_val):
     plt.show()
 
 
-def predict(data, weight, bias):
+def predict(data, weight, bias, l2_lambda=0.001):
     X_val, y_val = split_data_to_x_y(data)
 
     activations, _ = forward_propagation(X_val, weight, bias)
@@ -365,8 +362,8 @@ def predict(data, weight, bias):
     logging.info("Predicting the data")
     print("Predicting the data")
     for key, value in results.items():
-        print(f"{key}: {value}")
-        logging.info(f"{key}: {value}")
+        print(f"{key}: {value:.3f}")
+        logging.info(f"{key}: {value:.3f}")
 
 
 def load_weight_bias(file_weight, file_bias):
