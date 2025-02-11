@@ -269,26 +269,20 @@ def train(data_train, data_predict, hidden_layer_nb=2, output_nb=2,  epochs=1000
             gradients = backward_propagation(y_batch, activations, Z, weights)
 
             for l in range(len(weights)):
-                # Moments pour les poids
                 m_w[l] = beta1 * m_w[l] + (1 - beta1) * gradients['dW'][l]
                 v_w[l] = beta2 * v_w[l] + (1 - beta2) * (gradients['dW'][l] ** 2)
 
-                # Correction des biais d'estimation
                 m_w_hat = m_w[l] / (1 - beta1 ** (epoch + 1))
                 v_w_hat = v_w[l] / (1 - beta2 ** (epoch + 1))
 
-                # Mise à jour des poids
                 weights[l] -= learning_rate * m_w_hat / (np.sqrt(v_w_hat) + epsilon)
 
-                # Moments pour les biais
                 m_b[l] = beta1 * m_b[l] + (1 - beta1) * gradients['db'][l]
                 v_b[l] = beta2 * v_b[l] + (1 - beta2) * (gradients['db'][l] ** 2)
 
-                # Correction des biais d'estimation
                 m_b_hat = m_b[l] / (1 - beta1 ** (epoch + 1))
                 v_b_hat = v_b[l] / (1 - beta2 ** (epoch + 1))
 
-                # Mise à jour des biais
                 biases[l] -= learning_rate * m_b_hat / (np.sqrt(v_b_hat) + epsilon)
 
             # weights, biases = update_parameters(weights, biases, gradients, learning_rate)
