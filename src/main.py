@@ -1,5 +1,6 @@
 import logging
-
+from sklearn.metrics import log_loss
+import random
 import tqdm
 from sklearn.metrics import accuracy_score
 from sklearn.neural_network import MLPClassifier
@@ -9,6 +10,71 @@ from sklearn.model_selection import train_test_split
 import numpy as np
 import argparse
 import matplotlib.pyplot as plt
+import io
+import os
+import sys
+import random
+import csv
+
+
+def writeToCsv(path, content, labels):
+    ''' write a given content in a csv file.
+        arguments :
+            `path` : (string)
+                the path where we will save the csv file (relative or absolute path).
+            `content` : (ndarray/list)
+                the content to save in the csv file.
+            `labels` : (ndarray/list)
+                the labels of the csv columns.
+    '''
+    with io.open(path, 'w') as fd:
+        writer = csv.writer(fd)
+        if labels is not None:
+            content.insert(0, labels)
+        writer.writerows(content)
+
+
+def splitList(content, cut):
+    ''' splits an array in two.
+        arguments :
+            `content` : (ndarray/list)
+                the array to split in two.
+            `cut` : (float) in [0:1]
+                the ratio by which we will split the array.
+    '''
+    c = int(len(content) * cut)
+    return (content[:c], content[c:])
+
+
+def splitDataset(path, cut=0.2, label=False, shuffle=False):
+    ''' loads the dataset and splits it in two sets.
+        arguments :
+            `path` : (string)
+                the path to the dataset to load (relative or absolute path).
+            `cut` : (float) in [0:1]
+                the ratio for the reparition of the two sets (0.2 means 20 percents
+                for the test set and 80 percents for the training set).
+            `label` : (boolean)
+                wether the first line of the csv contains labels or not
+            `shuffle` : (boolean)
+                wether we shuffle the dataset before the split operation or not
+    '''
+    labels = None
+    content = []
+    csvfile = open(path, 'rb') if sys.version_info[0] < 3 else open(path, 'rt', encoding='utf-8')
+    reader = csv.reader(csvfile, delimiter=',')
+    for i, row in enumerate(reader):
+        if i == 0 and label is True:
+            labels = row
+            continue
+        content.append(row)
+    csvfile.close()
+    if shuffle is True:
+        random.shuffle(content)
+    filename = path[:path.rfind('.')]
+    testset, trainingset = splitList(content, float(cut))
+    writeToCsv(filename + '_test.csv', testset, labels)
+    writeToCsv(filename + '_training.csv', trainingset, labels)
 
 
 def preprocessing(data):
@@ -40,11 +106,12 @@ def load_data(filename):
 
 
 def split_data(data):
+    data = data.sample(frac = 1)
     y = data[1]
     X = data.drop(1, axis=1)
     X_train, X_val, y_train, y_val = train_test_split(
         X, y,
-        test_size=0.2,
+        test_size=0.25,
         random_state=42
     )
     return X_train, X_val, y_train, y_val
@@ -123,7 +190,7 @@ def softmax(x):
     return exp_x / np.sum(exp_x, axis=1, keepdims=True)
 
 
-def evaluate(y_train, y_pred, loss='binary_cross_entropy'):
+def evaluate(y_train, y_pred, loss='categorical_cross_entropy'):
     epsilon = 1e-15
     y_pred = np.clip(y_pred, epsilon, 1 - epsilon)
     # N = y_train.shape[0]
@@ -225,7 +292,7 @@ def update_parameters(weights, biases, gradients, learning_rate):
     return weights, biases
 
 
-def train(data_train, data_predict, hidden_layer_nb=3, output_nb=2,  epochs=200, learning_rate=0.01, batch_size=7, patience_early_stop=200):
+def train(data_train, data_predict, hidden_layer_nb=3, output_nb=2,  epochs=8000, learning_rate=0.001, batch_size=7, patience_early_stop=30):
 
     # Initialize
     X_train, y_train = split_data_to_x_y(data_train)
@@ -271,9 +338,9 @@ def train(data_train, data_predict, hidden_layer_nb=3, output_nb=2,  epochs=200,
         avg_loss = epoch_loss / (n_samples // batch_size)
 
         # Compute metrics
-        metrics_train.append(evaluate_metrics(y_batch, activations[-1], 'binary_cross_entropy'))
+        metrics_train.append(evaluate_metrics(y_batch, activations[-1]))
         activations, _ = forward_propagation(X_val, weights, biases)
-        metrics_val.append(evaluate_metrics(y_val, activations[-1], 'binary_cross_entropy'))
+        metrics_val.append(evaluate_metrics(y_val, activations[-1]))
         # if detect_overfitting(metrics_train, metrics_val):
         #     logging.info("Overfitting detected at epoch {epoch}")
         #     print(f"Overfitting detected at epoch {epoch}")
@@ -343,6 +410,7 @@ def predict(data, weight, bias):
 
 
     logging.info("Predicting the data")
+    print("Predicting the data")
     for key, value in results.items():
         print(f"{key}: {value}")
         logging.info(f"{key}: {value}")
@@ -371,7 +439,7 @@ def init_args():
     parser.add_argument(
         '--data-split',
         type=str,
-        default='data/raw/data.csv',
+        default='data/processed/data.csv',
         help='Path to the data file'
     )
 
@@ -411,7 +479,7 @@ def init_args():
 
     parser.add_argument(
         'mode',
-                    choices=['train', 'split', 'predict', 'sklearn'],
+                    choices=['train', 'split', 'predict', 'sklearn', 'pre',],
                     help='Mode of operation: train or predict'
     )
     args = parser.parse_args()
@@ -437,33 +505,42 @@ def main():
         save_data_split(X_train, X_val, y_train, y_val, args.data_train, args.data_predict)
         print('Data split successfully')
         logging.info("Split data successfully")
-    elif args.mode == 'train':
+    if args.mode == 'pre' or args.mode == 'sklearn':
+        data_train = preprocessing(load_data(args.data_train))
+        data_predict = preprocessing(load_data(args.data_predict))
+        data_train.to_csv(args.data_train, index=False)
+        data_predict.to_csv(args.data_predict, index=False)
+    if args.mode == 'train':
         data_train = load_data(args.data_train)
         data_predict = load_data(args.data_predict)
         weights, biases, metrics_train, metrics_val, = train(data_train, data_predict, hidden_layer_nb=2)
         display_results(metrics_train, metrics_val)
         save_weight_bias(weights, biases, args.data_train_weight, args.data_train_biais)
-    elif args.mode == 'sklearn':
-        logging.info("Using sklearn")
-        data_train = load_data(args.data_train)
-        X_train, y_train = split_data_to_x_y(data_train)
-        data_predict = load_data(args.data_predict)
-        X_val, y_val = split_data_to_x_y(data_predict)
-        mlp = MLPClassifier(hidden_layer_sizes=(16, 16),
-                            max_iter=1000, random_state=42)
-        mlp.fit(X_train, y_train)
-        y_pred = mlp.predict(X_val)
-        accuracy = accuracy_score(y_val, y_pred)
-        plt.plot(mlp.loss_curve_)
-        plt.title("Évolution de la perte (log-loss), with best loss : " + str(mlp.best_loss_))
-        plt.xlabel("Itérations")
-        plt.ylabel("Perte")
-        plt.show()
-        print(f"Accuracy: {accuracy}")
-    else:
+    if args.mode == 'predict':
         data = load_data(args.data_predict)
         weights, biases = load_weight_bias(args.data_train_weight, args.data_train_biais)
         predict(data, weights, biases)
+    if args.mode == 'sklearn':
+        logging.info("Using sklearn")
+        print("Using sklearn")
+        filepath = './data/data.csv'
+        splitDataset(filepath, cut=0.25, label=False, shuffle=True)
+        data_train = load_data(args.data_train)
+        X_train = data_train.drop(0, axis=1)
+        y_train = data_train[0]
+        data_predict = load_data(args.data_predict)
+        X_val = data_predict.drop(0, axis=1)
+        y_val = data_predict[0]
+        mlp = MLPClassifier(hidden_layer_sizes=(16, 16),
+                            max_iter=1000, random_state=42, learning_rate_init=0.001, batch_size=7, solver="adam",
+                            verbose=True)
+        mlp.fit(X_train, y_train)
+
+        # bce_train = log_loss(y_train, mlp.predict_proba(X_train))
+        bce_val = log_loss(y_val, mlp.predict_proba(X_val))
+
+        # print(f"Binary Cross-Entropy sur Train : {bce_train}")
+        print(f"{bce_val}")
 
 
 if __name__ == '__main__':
