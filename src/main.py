@@ -1,8 +1,6 @@
 import logging
 from sklearn.metrics import log_loss
-import random
 import tqdm
-from sklearn.metrics import accuracy_score
 from sklearn.neural_network import MLPClassifier
 from sklearn.preprocessing import MinMaxScaler
 import pandas as pd
@@ -10,11 +8,6 @@ from sklearn.model_selection import train_test_split
 import numpy as np
 import argparse
 import matplotlib.pyplot as plt
-import io
-import os
-import sys
-import random
-import csv
 
 
 def preprocessing(data):
@@ -184,6 +177,7 @@ def forward_propagation(X, weights, biases, activation='relu', output_activation
         if i == len(weights) - 1:
             if output_activation == 'softmax':
                 activation_output = softmax(z)
+                print("Softmax")
             else:
                 activation_output = sigmoid(z)
         else:
@@ -193,6 +187,7 @@ def forward_propagation(X, weights, biases, activation='relu', output_activation
                 activation_output = relu(z)
 
         layers.append(activation_output)
+
 
     return layers, Z
 
@@ -227,7 +222,7 @@ def update_parameters(weights, biases, gradients, learning_rate):
     return weights, biases
 
 
-def train(data_train, data_predict, hidden_layer_nb=2, output_nb=2,  epochs=1000, learning_rate=0.0001, batch_size=10,
+def train(data_train, data_predict, args, hidden_layer_nb=2, output_nb=2,  epochs=1000, learning_rate=0.0001, batch_size=10,
           patience_early_stop=100, beta1=0.9, beta2=0.999, epsilon=1e-8):
 
     X_train, y_train = split_data_to_x_y(data_train)
@@ -247,7 +242,7 @@ def train(data_train, data_predict, hidden_layer_nb=2, output_nb=2,  epochs=1000
     best_metrics = None
     wait = 0
 
-    pbar = tqdm.tqdm(range(epochs))
+    pbar = tqdm.tqdm(range(epochs), disable=args.disable_pbar)
     logging.info("Training the model")
     for epoch in pbar:
         np.random.seed(epoch)
@@ -429,6 +424,18 @@ def init_args():
         help='Disable logs'
     )
 
+    parser.add_argument(
+        '--disable-plot',
+        action='store_true',
+        help='Disable plot of the results'
+    )
+    parser.add_argument(
+        '--disable_pbar',
+        action='store_true',
+        help='Disable plot of the results'
+    )
+
+
 
     parser.add_argument(
         'mode',
@@ -451,7 +458,7 @@ def main():
     args = init_args()
     init_logs(args)
 
-    if args.mode == 'split' or args.mode == 'sklearn':
+    if args.mode == 'split':
         data = load_data(args.data_split)
         data = preprocessing(data)
         X_train, X_val, y_train, y_val = split_data(data)
@@ -463,13 +470,14 @@ def main():
         data_predict = preprocessing(load_data(args.data_predict))
         data_train.to_csv(args.data_train, index=False)
         data_predict.to_csv(args.data_predict, index=False)
-        print('Data preprocessing successfully')
+        # print('Data preprocessing successfully')
         logging.info("Data preprocessing successfully")
     elif args.mode == 'train':
         data_train = load_data(args.data_train)
         data_predict = load_data(args.data_predict)
-        weights, biases, metrics_train, metrics_val, = train(data_train, data_predict, hidden_layer_nb=2)
-        display_results(metrics_train, metrics_val)
+        weights, biases, metrics_train, metrics_val, = train(data_train, data_predict, args, hidden_layer_nb=2)
+        if not args.disable_plot:
+            display_results(metrics_train, metrics_val)
         save_weight_bias(weights, biases, args.data_train_weight, args.data_train_biais)
     if args.mode == 'predict':
         data = load_data(args.data_predict)
@@ -477,7 +485,7 @@ def main():
         predict(data, weights, biases)
     if args.mode == 'sklearn':
         logging.info("Using sklearn")
-        print("Using sklearn")
+        # print("Using sklearn")
         data_train = load_data(args.data_train)
         X_train = data_train.drop(0, axis=1)
         y_train = data_train[0]
@@ -486,8 +494,7 @@ def main():
         X_val = data_predict.drop(0, axis=1)
         y_val = data_predict[0]
         mlp = MLPClassifier(hidden_layer_sizes=(16, 16),
-                            max_iter=1000, random_state=42, learning_rate_init=0.001, batch_size=7, solver="adam",
-                            verbose=True)
+                            max_iter=1000, random_state=42, learning_rate_init=0.001, batch_size=10, solver="adam")
         mlp.fit(X_train, y_train)
 
         # bce_train = log_loss(y_train, mlp.predict_proba(X_train))
