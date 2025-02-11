@@ -180,7 +180,6 @@ def forward_propagation(X, weights, biases, activation='relu', output_activation
         if i == len(weights) - 1:
             if output_activation == 'softmax':
                 activation_output = softmax(z)
-                print("Softmax")
             else:
                 activation_output = sigmoid(z)
         else:
@@ -303,10 +302,6 @@ def train(data_train, data_predict, args, hidden_layer_nb=2, output_nb=2,  epoch
         else:
             wait += 1
             if wait >= patience_early_stop:
-                logging.info(f"Early stopping at epoch {epoch}")
-                logging.info(f"Best validation loss: {best_val_loss:.4f}")
-                print(f"Early stopping at epoch {epoch}")
-                print(f"Best validation loss: {best_val_loss:.3f}")
                 break
 
         pbar.set_description(f"Train Loss: {avg_train_loss:.4f}, Val Loss: {val_loss:.4f}")
@@ -315,6 +310,11 @@ def train(data_train, data_predict, args, hidden_layer_nb=2, output_nb=2,  epoch
             pbar.set_description(f"Loss: {avg_train_loss:.4f}")
             logging.info(f"Epoch {epoch} - Train Loss: {avg_train_loss:.4f}, Val Loss: {val_loss:.4f}")
 
+    if wait >= patience_early_stop:
+        logging.info(f"Early stopping at epoch {epoch}")
+        logging.info(f"Best validation loss: {best_val_loss:.4f}")
+        print(f"Early stopping at epoch {epoch}")
+        print(f"Best validation loss: {best_val_loss:.3f}")
     logging.info("Training completed")
     logging.info(f"Loss: {avg_train_loss}")
     logging.info(f"Accuracy: {metrics_val[-1]['accuracy']}")
