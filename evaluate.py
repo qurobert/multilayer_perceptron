@@ -77,6 +77,6 @@ def splitDataset(path, cut=0.2, label=False, shuffle=False):
 
 
 if __name__ == "__main__":
-    filepath = './data/raw/data.csv'
+    filepath = 'data/processed/data.csv'
     splitDataset(filepath, cut=0.25, label=False, shuffle=True)
 
