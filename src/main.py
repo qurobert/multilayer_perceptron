@@ -17,66 +17,6 @@ import random
 import csv
 
 
-def writeToCsv(path, content, labels):
-    ''' write a given content in a csv file.
-        arguments :
-            `path` : (string)
-                the path where we will save the csv file (relative or absolute path).
-            `content` : (ndarray/list)
-                the content to save in the csv file.
-            `labels` : (ndarray/list)
-                the labels of the csv columns.
-    '''
-    with io.open(path, 'w') as fd:
-        writer = csv.writer(fd)
-        if labels is not None:
-            content.insert(0, labels)
-        writer.writerows(content)
-
-
-def splitList(content, cut):
-    ''' splits an array in two.
-        arguments :
-            `content` : (ndarray/list)
-                the array to split in two.
-            `cut` : (float) in [0:1]
-                the ratio by which we will split the array.
-    '''
-    c = int(len(content) * cut)
-    return (content[:c], content[c:])
-
-
-def splitDataset(path, cut=0.2, label=False, shuffle=False):
-    ''' loads the dataset and splits it in two sets.
-        arguments :
-            `path` : (string)
-                the path to the dataset to load (relative or absolute path).
-            `cut` : (float) in [0:1]
-                the ratio for the reparition of the two sets (0.2 means 20 percents
-                for the test set and 80 percents for the training set).
-            `label` : (boolean)
-                wether the first line of the csv contains labels or not
-            `shuffle` : (boolean)
-                wether we shuffle the dataset before the split operation or not
-    '''
-    labels = None
-    content = []
-    csvfile = open(path, 'rb') if sys.version_info[0] < 3 else open(path, 'rt', encoding='utf-8')
-    reader = csv.reader(csvfile, delimiter=',')
-    for i, row in enumerate(reader):
-        if i == 0 and label is True:
-            labels = row
-            continue
-        content.append(row)
-    csvfile.close()
-    if shuffle is True:
-        random.shuffle(content)
-    filename = path[:path.rfind('.')]
-    testset, trainingset = splitList(content, float(cut))
-    writeToCsv(filename + '_test.csv', testset, labels)
-    writeToCsv(filename + '_training.csv', trainingset, labels)
-
-
 def preprocessing(data):
     # Change labels to 0 and 1
     logging.info("Preprocessing data...")
@@ -109,6 +49,7 @@ def split_data(data):
     data = data.sample(frac = 1)
     y = data[1]
     X = data.drop(1, axis=1)
+
     X_train, X_val, y_train, y_val = train_test_split(
         X, y,
         test_size=0.25,
@@ -203,7 +144,7 @@ def evaluate(y_train, y_pred, loss='categorical_cross_entropy'):
     return loss
 
 
-def evaluate_metrics(y_train, y_pred, loss='binary_cross_entropy'):
+def evaluate_metrics(y_train, y_pred, loss='categorical_cross_entropy'):
     epsilon = 1e-15
     y_pred = np.clip(y_pred, epsilon, 1 - epsilon)
 
@@ -286,7 +227,8 @@ def update_parameters(weights, biases, gradients, learning_rate):
     return weights, biases
 
 
-def train(data_train, data_predict, hidden_layer_nb=2, output_nb=2,  epochs=22000, learning_rate=0.0001, batch_size=10, patience_early_stop=1000):
+def train(data_train, data_predict, hidden_layer_nb=2, output_nb=2,  epochs=1000, learning_rate=0.0001, batch_size=10,
+          patience_early_stop=100, beta1=0.9, beta2=0.999, epsilon=1e-8):
 
     X_train, y_train = split_data_to_x_y(data_train)
     X_val, y_val = split_data_to_x_y(data_predict)
@@ -295,6 +237,10 @@ def train(data_train, data_predict, hidden_layer_nb=2, output_nb=2,  epochs=2200
     metrics_train = []
     metrics_val = []
 
+    m_w = [np.zeros_like(w) for w in weights]
+    v_w = [np.zeros_like(w) for w in weights]
+    m_b = [np.zeros_like(b) for b in biases]
+    v_b = [np.zeros_like(b) for b in biases]
     best_val_loss = float('inf')
     best_weights = None
     best_biases = None
@@ -322,7 +268,30 @@ def train(data_train, data_predict, hidden_layer_nb=2, output_nb=2,  epochs=2200
 
             gradients = backward_propagation(y_batch, activations, Z, weights)
 
-            weights, biases = update_parameters(weights, biases, gradients, learning_rate)
+            for l in range(len(weights)):
+                # Moments pour les poids
+                m_w[l] = beta1 * m_w[l] + (1 - beta1) * gradients['dW'][l]
+                v_w[l] = beta2 * v_w[l] + (1 - beta2) * (gradients['dW'][l] ** 2)
+
+                # Correction des biais d'estimation
+                m_w_hat = m_w[l] / (1 - beta1 ** (epoch + 1))
+                v_w_hat = v_w[l] / (1 - beta2 ** (epoch + 1))
+
+                # Mise à jour des poids
+                weights[l] -= learning_rate * m_w_hat / (np.sqrt(v_w_hat) + epsilon)
+
+                # Moments pour les biais
+                m_b[l] = beta1 * m_b[l] + (1 - beta1) * gradients['db'][l]
+                v_b[l] = beta2 * v_b[l] + (1 - beta2) * (gradients['db'][l] ** 2)
+
+                # Correction des biais d'estimation
+                m_b_hat = m_b[l] / (1 - beta1 ** (epoch + 1))
+                v_b_hat = v_b[l] / (1 - beta2 ** (epoch + 1))
+
+                # Mise à jour des biais
+                biases[l] -= learning_rate * m_b_hat / (np.sqrt(v_b_hat) + epsilon)
+
+            # weights, biases = update_parameters(weights, biases, gradients, learning_rate)
 
         avg_train_loss = epoch_loss / (n_samples // batch_size)
 
@@ -488,7 +457,7 @@ def main():
     args = init_args()
     init_logs(args)
 
-    if args.mode == 'split':
+    if args.mode == 'split' or args.mode == 'sklearn':
         data = load_data(args.data_split)
         data = preprocessing(data)
         X_train, X_val, y_train, y_val = split_data(data)
@@ -515,11 +484,10 @@ def main():
     if args.mode == 'sklearn':
         logging.info("Using sklearn")
         print("Using sklearn")
-        filepath = './data/data.csv'
-        splitDataset(filepath, cut=0.25, label=False, shuffle=True)
         data_train = load_data(args.data_train)
         X_train = data_train.drop(0, axis=1)
         y_train = data_train[0]
+
         data_predict = load_data(args.data_predict)
         X_val = data_predict.drop(0, axis=1)
         y_val = data_predict[0]
