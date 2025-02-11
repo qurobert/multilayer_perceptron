@@ -112,7 +112,7 @@ def split_data(data):
     X_train, X_val, y_train, y_val = train_test_split(
         X, y,
         test_size=0.25,
-        random_state=42
+        random_state=42,
     )
     return X_train, X_val, y_train, y_val
 
@@ -135,7 +135,7 @@ def split_data_to_x_y(data):
     return X, y
 
 
-def init(X_train, hidden_layer_nb=2, outputs_nb=2, weights_initializer='heUniform', hidden_nodes_nb=None):
+def init(X_train, hidden_layer_nb=2, outputs_nb=2, weights_initializer='he', hidden_nodes_nb=None):
 
     if hidden_nodes_nb is None:
         hidden_nodes_nb = int(((X_train.shape[1] + outputs_nb) / 2))
@@ -144,15 +144,12 @@ def init(X_train, hidden_layer_nb=2, outputs_nb=2, weights_initializer='heUnifor
     biases = []
 
     for layer in range(hidden_layer_nb + 1):
-        # Input Layer to Hidden Layer
         if layer == 0:
             nodes_in = X_train.shape[1]
             nodes_out = hidden_nodes_nb
-        # Hidden Layer to Hidden Layer
         elif layer < hidden_layer_nb:
             nodes_in = hidden_nodes_nb
             nodes_out = hidden_nodes_nb
-        # Hidden Layer to Output Layer
         else:
             nodes_in = hidden_nodes_nb
             nodes_out = outputs_nb
@@ -193,7 +190,6 @@ def softmax(x):
 def evaluate(y_train, y_pred, loss='categorical_cross_entropy'):
     epsilon = 1e-15
     y_pred = np.clip(y_pred, epsilon, 1 - epsilon)
-    # N = y_train.shape[0]
     N = len(y_train)
 
     if loss == 'binary_cross_entropy':
@@ -207,7 +203,7 @@ def evaluate(y_train, y_pred, loss='categorical_cross_entropy'):
     return loss
 
 
-def evaluate_metrics(y_train, y_pred, loss='categorical_cross_entropy'):
+def evaluate_metrics(y_train, y_pred, loss='binary_cross_entropy'):
     epsilon = 1e-15
     y_pred = np.clip(y_pred, epsilon, 1 - epsilon)
 
@@ -218,7 +214,6 @@ def evaluate_metrics(y_train, y_pred, loss='categorical_cross_entropy'):
 
     accuracy = np.mean(y_pred_class == y_true_class)
 
-    # Precision, Recall, F1
     true_positives = np.sum((y_true_class == 1) & (y_pred_class == 1))
     false_positives = np.sum((y_true_class == 0) & (y_pred_class == 1))
     false_negatives = np.sum((y_true_class == 1) & (y_pred_class == 0))
@@ -238,14 +233,13 @@ def evaluate_metrics(y_train, y_pred, loss='categorical_cross_entropy'):
 
 
 def forward_propagation(X, weights, biases, activation='relu', output_activation='softmax'):
-    layers = [X]  # List of layer activations
-    Z = []        # List of pre-activation values
+    layers = [X]
+    Z = []
 
     for i in range(len(weights)):
         z = np.dot(layers[i], weights[i].T) + biases[i]
         Z.append(z)
 
-        # Compute activation
         if i == len(weights) - 1:
             if output_activation == 'softmax':
                 activation_output = softmax(z)
@@ -262,10 +256,10 @@ def forward_propagation(X, weights, biases, activation='relu', output_activation
     return layers, Z
 
 
-def backward_propagation(y_true, activations, Z, weights, activation='sigmoid'):
+def backward_propagation(y_true, activations, Z, weights, activation='relu'):
     gradients = {"dW": [], "db": []}
     num_layers = len(weights)
-    m = y_true.shape[0]  # Number of samples
+    m = y_true.shape[0]
 
     delta = (activations[-1] - y_true) / m
 
@@ -292,83 +286,79 @@ def update_parameters(weights, biases, gradients, learning_rate):
     return weights, biases
 
 
-def train(data_train, data_predict, hidden_layer_nb=3, output_nb=2,  epochs=8000, learning_rate=0.001, batch_size=7, patience_early_stop=30):
+def train(data_train, data_predict, hidden_layer_nb=2, output_nb=2,  epochs=22000, learning_rate=0.0001, batch_size=10, patience_early_stop=1000):
 
-    # Initialize
     X_train, y_train = split_data_to_x_y(data_train)
     X_val, y_val = split_data_to_x_y(data_predict)
-    hidden_nodes_nb, weights, biases = init(X_train, hidden_layer_nb, output_nb, 'xavier', 28)
+    hidden_nodes_nb, weights, biases = init(X_train, hidden_layer_nb, output_nb, 'he', 22)
     n_samples = X_train.shape[0]
-    wait = 0
-    best_loss = float('inf')
     metrics_train = []
     metrics_val = []
 
+    best_val_loss = float('inf')
+    best_weights = None
+    best_biases = None
+    best_metrics = None
+    wait = 0
 
-    # Training
     pbar = tqdm.tqdm(range(epochs))
     logging.info("Training the model")
     for epoch in pbar:
-        # Shuffle data
         np.random.seed(epoch)
         permutation = np.random.permutation(n_samples)
         X_shuffled = X_train.iloc[permutation]
         y_shuffled = y_train[permutation]
 
         epoch_loss = 0
-        # Mini-batch training
         for i in range(0, n_samples, batch_size):
             X_batch = X_shuffled.iloc[i:i+batch_size]
             y_batch = y_shuffled[i:i+batch_size]
 
-            # Forward pass
             activations, Z = forward_propagation(X_batch, weights, biases)
 
-            # Compute loss
             loss = round(evaluate(y_batch, activations[-1]), 4)
 
             epoch_loss += loss
 
-            # Backward pass
             gradients = backward_propagation(y_batch, activations, Z, weights)
 
-            # Update parameters
             weights, biases = update_parameters(weights, biases, gradients, learning_rate)
 
-        avg_loss = epoch_loss / (n_samples // batch_size)
+        avg_train_loss = epoch_loss / (n_samples // batch_size)
 
-        # Compute metrics
+        val_activations, _ = forward_propagation(X_val, weights, biases)
+        val_metrics = evaluate_metrics(y_val, val_activations[-1])
+        metrics_val.append(val_metrics)
+        val_loss = val_metrics['loss']
+
         metrics_train.append(evaluate_metrics(y_batch, activations[-1]))
-        activations, _ = forward_propagation(X_val, weights, biases)
-        metrics_val.append(evaluate_metrics(y_val, activations[-1]))
-        # if detect_overfitting(metrics_train, metrics_val):
-        #     logging.info("Overfitting detected at epoch {epoch}")
-        #     print(f"Overfitting detected at epoch {epoch}")
-        #     break
 
-        # Early stopping
-        if avg_loss < best_loss:
-            best_loss = avg_loss
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            best_weights = [w.copy() for w in weights]
+            best_biases = [b.copy() for b in biases]
+            best_metrics = val_metrics
             wait = 0
         else:
             wait += 1
             if wait >= patience_early_stop:
                 logging.info(f"Early stopping at epoch {epoch}")
+                logging.info(f"Best validation loss: {best_val_loss:.4f}")
                 print(f"Early stopping at epoch {epoch}")
+                print(f"Best validation loss: {best_val_loss:.4f}")
                 break
 
-        # Print loss every 100 epochs
-        if epoch % 100 == 0:
-            pbar.set_description(f"Loss: {avg_loss:.4f}")
-            logging.info(f"Epoch {epoch} - Loss: {avg_loss:.4f}")
+        pbar.set_description(f"Train Loss: {avg_train_loss:.4f}, Val Loss: {val_loss:.4f}")
 
-        # learning_rate = adaptive_learning_rate(learning_rate, epoch, epochs)
+        if epoch % 100 == 0:
+            pbar.set_description(f"Loss: {avg_train_loss:.4f}")
+            logging.info(f"Epoch {epoch} - Train Loss: {avg_train_loss:.4f}, Val Loss: {val_loss:.4f}")
 
     logging.info("Training completed")
-    logging.info(f"Loss: {avg_loss}")
+    logging.info(f"Loss: {avg_train_loss}")
     logging.info(f"Accuracy: {metrics_val[-1]['accuracy']}")
-    return weights, biases, metrics_train, metrics_val
-
+    logging.info(f"Best metrics: {best_metrics}")
+    return best_weights, best_biases, metrics_train, metrics_val
 
 def moving_average(data, window_size=50):
     return np.convolve(data, np.ones(window_size)/window_size, mode='valid')
@@ -446,14 +436,14 @@ def init_args():
     parser.add_argument(
         '--data-train',
         type=str,
-        default='data/processed/data_train.csv',
+        default='data/processed/data_training.csv',
         help='Path to the processed predict data file'
     )
 
     parser.add_argument(
         '--data-predict',
         type=str,
-        default='data/processed/data_predict.csv',
+        default='data/processed/data_test.csv',
         help='Path to the processed data file'
     )
 
@@ -505,12 +495,14 @@ def main():
         save_data_split(X_train, X_val, y_train, y_val, args.data_train, args.data_predict)
         print('Data split successfully')
         logging.info("Split data successfully")
-    if args.mode == 'pre' or args.mode == 'sklearn':
+    elif args.mode == "pre":
         data_train = preprocessing(load_data(args.data_train))
         data_predict = preprocessing(load_data(args.data_predict))
         data_train.to_csv(args.data_train, index=False)
         data_predict.to_csv(args.data_predict, index=False)
-    if args.mode == 'train':
+        print('Data preprocessing successfully')
+        logging.info("Data preprocessing successfully")
+    elif args.mode == 'train':
         data_train = load_data(args.data_train)
         data_predict = load_data(args.data_predict)
         weights, biases, metrics_train, metrics_val, = train(data_train, data_predict, hidden_layer_nb=2)
