@@ -39,7 +39,6 @@ def load_data(filename):
 
 
 def split_data(data):
-    data = data.sample(frac = 1)
     y = data[1]
     X = data.drop(1, axis=1)
 
